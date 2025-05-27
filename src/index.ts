@@ -5,6 +5,7 @@
  * 
  * This MCP server provides web search functionality using OpenRouter's online-enabled models.
  * It can run as both an MCP server (stdio) and as a web service for deployment platforms.
+ * Updated for proper Render.com deployment detection.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
