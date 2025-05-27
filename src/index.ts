@@ -4,7 +4,7 @@
  * OpenRouter Search MCP Server
  * 
  * This MCP server provides web search functionality using OpenRouter's online-enabled models.
- * It allows customizable model selection via environment variables and tool parameters.
+ * It can run as both an MCP server (stdio) and as a web service for deployment platforms.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -16,10 +16,14 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
+import { createServer } from "http";
+import { URL } from "url";
 
 // Configuration
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'openai/gpt-4o:online';
+const PORT = process.env.PORT || 3000;
+const MODE = process.env.MODE || 'auto'; // 'mcp', 'web', or 'auto'
 
 if (!OPENROUTER_API_KEY) {
   throw new Error('OPENROUTER_API_KEY environment variable is required');
@@ -61,24 +65,6 @@ const WebSearchInputSchema = {
   required: ['query']
 } as const;
 
-// Define Tool Output Schema (optional but good practice)
-const WebSearchOutputSchema = {
-  type: 'object',
-  properties: {
-    results: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          link: { type: 'string' },
-          snippet: { type: 'string' }
-        }
-      }
-    }
-  }
-} as const;
-
 class OpenRouterSearchServer {
   private server: Server;
   private axiosInstance;
@@ -101,9 +87,8 @@ class OpenRouterSearchServer {
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        // Recommended headers by OpenRouter
-        'HTTP-Referer': 'http://localhost', // Replace with your actual site URL or app name
-        'X-Title': 'MCP OpenRouter Search', // Replace with your actual site URL or app name
+        'HTTP-Referer': 'https://openrouter-search-mcp.onrender.com',
+        'X-Title': 'MCP OpenRouter Search',
       },
     });
 
@@ -143,51 +128,182 @@ class OpenRouterSearchServer {
         );
       }
 
-      const { query } = request.params.arguments;
-      const model = request.params.arguments.model || DEFAULT_MODEL;
+      return await this.performSearch(request.params.arguments);
+    });
+  }
 
-      try {
-        const response = await this.axiosInstance.post('/chat/completions', {
-          model: model, // Use customizable model
-          messages: [
-            {
-              role: 'user',
-              content: query
-            }
-          ]
-        });
+  private async performSearch(params: SearchParams) {
+    const { query } = params;
+    const model = params.model || DEFAULT_MODEL;
 
-        // The online model should return search results
-        // Parse the response to extract structured search results
-        const content = response.data.choices[0]?.message?.content || '';
-        
-        // For now, return the raw content as text
-        // In a real implementation, you might want to parse this into structured SearchResult objects
-        return {
-          content: [
-            {
-              type: 'text',
-              text: content,
-            },
-          ],
-        };
-      } catch (error) {
-        if (axios.isAxiosError(error)) {
-          const errorMessage = error.response?.data?.error?.message || error.message;
-          throw new McpError(
-            ErrorCode.InternalError,
-            `OpenRouter API error: ${errorMessage}`
-          );
-        }
-        throw error;
+    try {
+      const response = await this.axiosInstance.post('/chat/completions', {
+        model: model,
+        messages: [
+          {
+            role: 'user',
+            content: query
+          }
+        ]
+      });
+
+      const content = response.data.choices[0]?.message?.content || '';
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: content,
+          },
+        ],
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        throw new McpError(
+          ErrorCode.InternalError,
+          `OpenRouter API error: ${errorMessage}`
+        );
       }
+      throw error;
+    }
+  }
+
+  async runMCP() {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error('OpenRouter Search MCP server running on stdio');
+  }
+
+  async runWebServer() {
+    const httpServer = createServer(async (req, res) => {
+      // Enable CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>OpenRouter Search MCP Server</title>
+            <style>
+              body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+              .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+              code { background: #e0e0e0; padding: 2px 4px; border-radius: 3px; }
+            </style>
+          </head>
+          <body>
+            <h1>OpenRouter Search MCP Server</h1>
+            <p>This server is running and ready to accept requests.</p>
+            
+            <h2>Available Endpoints:</h2>
+            
+            <div class="endpoint">
+              <h3>POST /search</h3>
+              <p>Perform a web search using OpenRouter models</p>
+              <p><strong>Body:</strong> <code>{"query": "your search query", "model": "optional-model-name"}</code></p>
+            </div>
+
+            <div class="endpoint">
+              <h3>GET /health</h3>
+              <p>Health check endpoint</p>
+            </div>
+
+            <h2>Usage as MCP Server:</h2>
+            <p>To use this as an MCP server locally, run: <code>node build/index.js</code></p>
+            
+            <h2>Environment Variables:</h2>
+            <ul>
+              <li><code>OPENROUTER_API_KEY</code> - Required</li>
+              <li><code>DEFAULT_MODEL</code> - Optional (default: openai/gpt-4o:online)</li>
+              <li><code>PORT</code> - Optional (default: 3000)</li>
+              <li><code>MODE</code> - Optional: 'mcp', 'web', or 'auto' (default: auto)</li>
+            </ul>
+          </body>
+          </html>
+        `);
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/search') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+          try {
+            const data = JSON.parse(body);
+            
+            if (!data.query || typeof data.query !== 'string') {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Missing or invalid query parameter' }));
+              return;
+            }
+
+            const result = await this.performSearch({
+              query: data.query,
+              model: data.model
+            });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            console.error('Search error:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              error: error instanceof Error ? error.message : 'Internal server error' 
+            }));
+          }
+        });
+        return;
+      }
+
+      // 404 for all other routes
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+    });
+
+    httpServer.listen(PORT, () => {
+      console.log(`OpenRouter Search web server running on port ${PORT}`);
+      console.log(`Visit http://localhost:${PORT} for documentation`);
+    });
+
+    // Keep the process alive
+    process.on('SIGTERM', () => {
+      console.log('Received SIGTERM, shutting down gracefully');
+      httpServer.close(() => {
+        process.exit(0);
+      });
     });
   }
 
   async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('OpenRouter Search MCP server running on stdio');
+    // Determine mode
+    const isStdioAvailable = !process.stdin.isTTY;
+    const shouldRunMCP = MODE === 'mcp' || (MODE === 'auto' && isStdioAvailable);
+    const shouldRunWeb = MODE === 'web' || (MODE === 'auto' && !isStdioAvailable);
+
+    if (shouldRunMCP) {
+      await this.runMCP();
+    } else if (shouldRunWeb) {
+      await this.runWebServer();
+    } else {
+      console.error('No valid mode detected. Set MODE environment variable to "mcp" or "web"');
+      process.exit(1);
+    }
   }
 }
 
