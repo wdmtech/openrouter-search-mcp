@@ -291,15 +291,15 @@ class OpenRouterSearchServer {
   }
 
   async run() {
-    // Determine mode
-    const isStdioAvailable = !process.stdin.isTTY;
-    const shouldRunMCP = MODE === 'mcp' || (MODE === 'auto' && isStdioAvailable);
-    const shouldRunWeb = MODE === 'web' || (MODE === 'auto' && !isStdioAvailable);
+    // Determine mode - prefer web mode for deployment platforms
+    const isDeployment = process.env.PORT || process.env.RENDER || process.env.HEROKU_APP_NAME || process.env.NODE_ENV === 'production';
+    const shouldRunWeb = MODE === 'web' || (MODE === 'auto' && isDeployment);
+    const shouldRunMCP = MODE === 'mcp' || (MODE === 'auto' && !isDeployment);
 
-    if (shouldRunMCP) {
-      await this.runMCP();
-    } else if (shouldRunWeb) {
+    if (shouldRunWeb) {
       await this.runWebServer();
+    } else if (shouldRunMCP) {
+      await this.runMCP();
     } else {
       console.error('No valid mode detected. Set MODE environment variable to "mcp" or "web"');
       process.exit(1);
