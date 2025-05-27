@@ -88,6 +88,39 @@ Once configured, you can use the search functionality through your MCP client:
 2. **Model-specific search**: Use the `web_search` tool with a specific model parameter
 3. **Environment-based**: Set `DEFAULT_MODEL` to change the default model globally
 
+## Deployment
+
+This server can be deployed as a web service on platforms like Render.com, Heroku, or Railway.
+
+### Render.com Deployment
+
+1. Fork or clone this repository to your GitHub account
+2. Connect your GitHub repository to Render.com
+3. Create a new Web Service with these settings:
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm start`
+   - **Environment Variables**:
+     - `OPENROUTER_API_KEY`: Your OpenRouter API key
+     - `NODE_ENV`: `production` (optional)
+     - `DEFAULT_MODEL`: Your preferred model (optional)
+
+The server will automatically detect the deployment environment and run in web mode, providing both a documentation interface and REST API endpoints.
+
+### Web API Endpoints
+
+When deployed as a web service:
+
+- `GET /` - Documentation and status page
+- `GET /health` - Health check endpoint
+- `POST /search` - Web search endpoint
+
+**Example API usage:**
+```bash
+curl -X POST https://your-deployment-url.com/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "latest AI developments", "model": "openai/gpt-4o:online"}'
+```
+
 ## Development
 
 To modify or extend this server:
